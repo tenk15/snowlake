@@ -1,0 +1,35 @@
+[project]
+name = "snowlake"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Timo Reinartz", email = "timo@reinartzonline.de" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "dotenv>=0.9.9",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "snowflake>=1.12.1",
+    "snowflake-snowpark-python[pandas]>=1.54.0",
+]
+
+[project.scripts]
+snowlake = "snowlake:main.main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+strict = []
+
+[dependency-groups]
+dev = [
+    "ipdb>=0.13.13",
+    "pyright>=1.1.411",
+    "ruff>=0.16.1",
+]
