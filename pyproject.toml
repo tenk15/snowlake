@@ -1,7 +1,8 @@
 [project]
 name = "snowlake"
 version = "0.1.0"
-description = "Add your description here"
+description = """snowlake implements a git lfs custom transfer agent in order to facilitate
+the management and versioning of binary files in snowflake stages. """
 readme = "README.md"
 authors = [
     { name = "Timo Reinartz", email = "timo@reinartzonline.de" }

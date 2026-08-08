@@ -485,6 +485,7 @@ def handle_lfs_download(
 
 def smudge(session: Session, head_ref: str, path: str) -> str:
     db = session.get_current_database()
+    assert db is not None, "This function should be only ever run as owner"
     head_ref_regx = compile(r"(?P<schema>[^\.]+)\.(?P<table>[^\.]+)$")
     match = head_ref_regx.match(head_ref)
     if (
@@ -497,19 +498,55 @@ def smudge(session: Session, head_ref: str, path: str) -> str:
         )
     if not session.catalog.table_exists(table, database=db, schema=schema):
         raise RuntimeError(f"HEAD Table {db}.{schema}.{table} does not exists.")
-    assert db is not None, "This function should be only ever run as owner"
     df = session.table([db, schema, table])
-    row = (
-        df.select(col("OID"), col("DATABASE"), col("SCHEMA"), col("STAGE"))
-        .where(lit(path) == col("FILE"))
-        .collect()
-        .pop()
-        .as_dict()
-    )
+    try:
+        row = (
+            df.select(col("OID"), col("DATABASE"), col("SCHEMA"), col("STAGE"))
+            .where(lit(path) == col("FILE"))
+            .collect()
+            .pop()
+            .as_dict()
+        )
+    except IndexError:
+        raise FileNotFoundError("File does not exist in HEAD")
     return f"@{row['DATABASE']}.{row['SCHEMA']}.{row['STAGE']}/{row['OID']}"
 
 
 smudge.__module__ = "__main__"
+
+
+def load_parquet(session: Session, head_ref: str, path: str, table_ref: str) -> None:
+    db = session.get_current_database()
+    assert db is not None, "This function should be only ever run as owner"
+    table_ref_regx = compile(r"(?P<schema>[^\.]+)\.(?P<table>[^\.]+)$")
+    match = table_ref_regx.match(head_ref)
+    if (
+        not match
+        or not (schema_sl := str(match.group("schema")))
+        or not (head := str(match.group("table")))
+    ):
+        raise RuntimeError(
+            f"HEAD Table reference malformed. Got {head_ref}. Expected <SCHEMA>.<TABLE>."
+        )
+    match = table_ref_regx.match(table_ref)
+    if (
+        not match
+        or not (schema_tb := str(match.group("schema")))
+        or not (table := str(match.group("table")))
+    ):
+        raise RuntimeError(
+            f"Target Table reference malformed. Got {head_ref}. Expected <SCHEMA>.<TABLE>."
+        )
+    if not session.catalog.table_exists(head, database=db, schema=schema_sl):
+        raise RuntimeError(f"HEAD Table {db}.{schema_sl}.{head} does not exists.")
+    smudge = f"{db}.{schema_sl}.smudge"
+    obj = session.sql(f"call {smudge}('{head_ref}', '{path}') ").collect()[0]["SMUDGE"]
+    assert isinstance(obj, str)
+    df = session.read.option("USE_LOGICAL_TYPE", True).parquet(obj)
+    df.write.save_as_table([db, schema_tb, table], mode="overwrite")
+
+
+load_parquet.__module__ = "__main__"
 
 
 def checkout(args: CheckoutArguments, opts: SnowlakeOptions):
@@ -525,13 +562,16 @@ def checkout(args: CheckoutArguments, opts: SnowlakeOptions):
     if not session.catalog.schema_exists(opts.schema_, database=args.database):
         Root(session).databases[args.database].schemas.create(Schema(opts.schema_))
     _ = run(["git", "fetch"], check=True)
-    commit, message = (
-        check_output(
-            ["git", "show", "--format=%H %B", "--no-patch", f"{args.branch}"], text=True
+    try:
+        commit, message = (
+            check_output(
+                ["git", "show", "--format=%H;%B", "--no-patch", f"{args.branch}"], text=True
+            )
+            .strip()
+            .split(";")
         )
-        .strip()
-        .split()
-    )
+    except ValueError as e:
+        raise NotImplementedError("';' can't be used in commits - it's used as a separator in parsing.")
     if not check_output(
         [
             "git",
@@ -590,6 +630,14 @@ def checkout(args: CheckoutArguments, opts: SnowlakeOptions):
     session.sproc.register(
         smudge,
         name=f"{args.database}.{opts.schema_}.SMUDGE",
+        replace=True,
+        is_permanent=True,
+        stage_location=f"@{args.database}.{opts.schema_}.{opts.obj}",
+        packages=["snowflake-snowpark-python", "snowflake-core"],
+    )
+    session.sproc.register(
+        load_parquet,
+        name=f"{args.database}.{opts.schema_}.LOAD_PARQUET",
         replace=True,
         is_permanent=True,
         stage_location=f"@{args.database}.{opts.schema_}.{opts.obj}",
