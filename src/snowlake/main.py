@@ -632,7 +632,7 @@ def checkout(args: CheckoutArguments, opts: SnowlakeOptions):
         name=f"{args.database}.{opts.schema_}.SMUDGE",
         replace=True,
         is_permanent=True,
-        stage_location=f"@{args.database}.{opts.schema_}.{opts.obj}",
+        stage_location=f"@{root_database}.{opts.schema_}.{opts.obj}",
         packages=["snowflake-snowpark-python", "snowflake-core"],
     )
     session.sproc.register(
@@ -640,6 +640,6 @@ def checkout(args: CheckoutArguments, opts: SnowlakeOptions):
         name=f"{args.database}.{opts.schema_}.LOAD_PARQUET",
         replace=True,
         is_permanent=True,
-        stage_location=f"@{args.database}.{opts.schema_}.{opts.obj}",
+        stage_location=f"@{root_database}.{opts.schema_}.{opts.obj}",
         packages=["snowflake-snowpark-python", "snowflake-core"],
     )
